@@ -13,27 +13,11 @@
       "Ssh": { "User": "root", "Password": "..." }
     },
     {
-      "Name": "postgres",
-      "Host": "10.0.0.30",
-      "Port": 5432,
+      "Name": "nginx",
+      "Host": "10.0.0.20",
+      "Port": 80,
+      "HttpCheck": { "Url": "http://10.0.0.20/" },
       "Ssh": { "User": "root", "Password": "..." }
-    },
-    {
-      "Name": "redis",
-      "Host": "10.0.0.40",
-      "Port": 6379,
-      "Ssh": { "User": "root", "Password": "..." }
-    },
-    {
-      "Name": "myapp",
-      "Host": "10.0.0.50",
-      "Port": 8080,
-      "HttpCheck": { "Url": "http://10.0.0.50:8080/health" },
-      "Ssh": {
-        "User": "deploy",
-        "Password": "...",
-        "RestartCommand": "docker restart myapp"
-      }
     }
   ],
 
