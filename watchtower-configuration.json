@@ -6,6 +6,7 @@
 
   "Services": [
     {
+      "NodeName": "SRV-1",
       "Name": "nginx",
       "Host": "10.0.0.20",
       "Port": 80,
@@ -13,6 +14,7 @@
       "Ssh": { "User": "root", "Password": "..." }
     },
     {
+      "NodeName": "SRV-2",
       "Name": "nginx",
       "Host": "10.0.0.20",
       "Port": 80,
@@ -22,7 +24,7 @@
   ],
 
   "Telegram": {
-    "BotToken": "8629550095:AAEsR15scMSRFW0hGWYc5gVDXA3BVZOjn3A",
-    "ChatId": "-1003912111374"
+    "BotToken": "Ваш токен бота",
+    "ChatId": "Ваш chat_id"
   }
 }

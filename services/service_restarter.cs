@@ -15,8 +15,8 @@ public class ServiceRestarter
 
     public async Task RestartServiceAsync(ServiceConfig service)
     {
-        _logger.Info($"Перезапуск {service.Name}...");
-        await _telegram.SendMessageAsync($"🔄 Сервис «{service.Name}» — попытка перезапуска...");
+        _logger.Info($"Перезапуск {service.LogName}...");
+        await _telegram.SendMessageAsync($"🔄 Сервис «{service.DisplayName}» — попытка перезапуска...");
 
         try
         {
@@ -29,25 +29,25 @@ public class ServiceRestarter
                 var (reachable, isRunning) = await _probe.CheckAsync(service);
                 if (reachable && isRunning)
                 {
-                    _logger.Info($"{service.Name} работает после перезапуска");
-                    await _telegram.SendMessageAsync($"🟢 Сервис «{service.Name}» — восстановлен после перезапуска.");
+                    _logger.Info($"{service.LogName} работает после перезапуска");
+                    await _telegram.SendMessageAsync($"🟢 Сервис «{service.DisplayName}» — восстановлен после перезапуска.");
                 }
                 else
                 {
-                    _logger.Warning($"{service.Name} всё ещё не работает после перезапуска");
-                    await _telegram.SendMessageAsync($"⚠️ Сервис «{service.Name}» — не удалось восстановить.");
+                    _logger.Warning($"{service.LogName} всё ещё не работает после перезапуска");
+                    await _telegram.SendMessageAsync($"⚠️ Сервис «{service.DisplayName}» — не удалось восстановить.");
                 }
             }
             else
             {
-                _logger.Error($"Не удалось перезапустить {service.Name}");
-                await _telegram.SendMessageAsync($"❌ Сервис «{service.Name}» — команда перезапуска не выполнена.");
+                _logger.Error($"Не удалось перезапустить {service.LogName}");
+                await _telegram.SendMessageAsync($"❌ Сервис «{service.DisplayName}» — команда перезапуска не выполнена.");
             }
         }
         catch (Exception ex)
         {
-            _logger.Error($"Ошибка перезапуска {service.Name}: {ex.Message}");
-            await _telegram.SendMessageAsync($"⚠️ Сервис «{service.Name}» — ошибка перезапуска.");
+            _logger.Error($"Ошибка перезапуска {service.LogName}: {ex.Message}");
+            await _telegram.SendMessageAsync($"⚠️ Сервис «{service.DisplayName}» — ошибка перезапуска.");
         }
     }
 }

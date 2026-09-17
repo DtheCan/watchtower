@@ -2,6 +2,8 @@ namespace watchtower.services;
 
 public class ServiceConfig
 {
+    public string NodeName { get; set; } = "";
+
     public string Name { get; set; } = "";
     public string Host { get; set; } = "";
     public int Port { get; set; }
@@ -12,7 +14,13 @@ public class ServiceConfig
     public bool HttpEnabled => HttpCheck != null && !string.IsNullOrWhiteSpace(HttpCheck.Url);
     public bool SshEnabled  => Ssh != null && !string.IsNullOrWhiteSpace(Ssh.User);
 
-    public override string ToString() => Name;
+    public string Key => $"{NodeName}:{Name}";
+        public string DisplayName =>
+        string.IsNullOrEmpty(NodeName) ? Name : $"{NodeName} / {Name}";
+
+    public string LogName => $"{DisplayName} ({Host}:{Port})";
+
+    public override string ToString() => LogName;
 }
 
 public class HttpCheckConfig

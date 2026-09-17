@@ -5,149 +5,160 @@ namespace watchtower.services;
 
 public class HttpProbe
 {
-  private readonly LogingService _logger;
-  private readonly HttpClient _client;
+    private readonly LogingService _logger;
+    private readonly HttpClient _client;
 
-  public HttpProbe(LogingService logger, IHttpClientFactory factory)
-  {
-    _logger = logger;
-    _client = factory.CreateClient("probe");
-  }
-
-  public async Task<(bool reachable, bool healthy, int? statusCode, long elapsedMs)> CheckAsync(
-      ServiceConfig svc, CancellationToken ct)
-  {
-    var cfg = svc.HttpCheck!;
-    var sw = Stopwatch.StartNew();
-
-    try
+    public HttpProbe(LogingService logger, IHttpClientFactory factory)
     {
-      using var req = new HttpRequestMessage(new HttpMethod(cfg.Method), cfg.Url);
-      foreach (var h in cfg.Headers)
-        req.Headers.TryAddWithoutValidation(h.Key, h.Value);
-
-      using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-      cts.CancelAfter(TimeSpan.FromSeconds(cfg.TimeoutSeconds));
-
-      using var resp = await _client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token);
-      sw.Stop();
-
-      int code = (int)resp.StatusCode;
-      bool ok = code == cfg.ExpectedStatusCode;
-
-      _logger.Info("http_probe",
-          $"[{svc.Name}] {cfg.Method} {cfg.Url} → {code} за {sw.ElapsedMilliseconds}ms (ожидалось {cfg.ExpectedStatusCode})");
-
-      return (true, ok, code, sw.ElapsedMilliseconds);
+        _logger = logger;
+        _client = factory.CreateClient("probe");
     }
-    catch (TaskCanceledException)
+
+    public async Task<(bool reachable, bool healthy, int? statusCode, long elapsedMs)> CheckAsync(
+        ServiceConfig svc, CancellationToken ct)
     {
-      sw.Stop();
-      _logger.Warning("http_probe",
-          $"[{svc.Name}] {cfg.Method} {cfg.Url} → TIMEOUT ({cfg.TimeoutSeconds}s)");
-      return (false, false, null, sw.ElapsedMilliseconds);
+        var cfg = svc.HttpCheck!;
+        var sw = Stopwatch.StartNew();
+
+        try
+        {
+            using var req = new HttpRequestMessage(new HttpMethod(cfg.Method), cfg.Url);
+            foreach (var h in cfg.Headers)
+                req.Headers.TryAddWithoutValidation(h.Key, h.Value);
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(cfg.TimeoutSeconds));
+
+            using var resp = await _client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            sw.Stop();
+
+            int code = (int)resp.StatusCode;
+            bool ok = code == cfg.ExpectedStatusCode;
+
+            _logger.Info("http_probe",
+                $"[{svc.LogName}] {cfg.Method} {cfg.Url} → {code} за {sw.ElapsedMilliseconds}ms (ожидалось {cfg.ExpectedStatusCode})");
+
+            return (true, ok, code, sw.ElapsedMilliseconds);
+        }
+        catch (TaskCanceledException)
+        {
+            sw.Stop();
+            _logger.Warning("http_probe",
+                $"[{svc.LogName}] {cfg.Method} {cfg.Url} → TIMEOUT ({cfg.TimeoutSeconds}s)");
+            return (false, false, null, sw.ElapsedMilliseconds);
+        }
+        catch (HttpRequestException ex)
+        {
+            sw.Stop();
+            _logger.Warning("http_probe",
+                $"[{svc.LogName}] {cfg.Method} {cfg.Url} → ОШИБКА: {ex.Message}");
+            return (false, false, null, sw.ElapsedMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            _logger.Error("http_probe",
+                $"[{svc.LogName}] {cfg.Method} {cfg.Url} → ИСКЛЮЧЕНИЕ: {ex.Message}");
+            return (false, false, null, sw.ElapsedMilliseconds);
+        }
     }
-    catch (HttpRequestException ex)
-    {
-      sw.Stop();
-      _logger.Warning("http_probe",
-          $"[{svc.Name}] {cfg.Method} {cfg.Url} → ОШИБКА: {ex.Message}");
-      return (false, false, null, sw.ElapsedMilliseconds);
-    }
-    catch (Exception ex)
-    {
-      sw.Stop();
-      _logger.Error("http_probe",
-          $"[{svc.Name}] {cfg.Method} {cfg.Url} → ИСКЛЮЧЕНИЕ: {ex.Message}");
-      return (false, false, null, sw.ElapsedMilliseconds);
-    }
-  }
 }
 
 public class ServiceProbe
 {
-  private readonly LogingService _logger;
+    private readonly LogingService _logger;
 
-  public ServiceProbe(LogingService logger)
-  {
-    _logger = logger;
-  }
-
-  public async Task<(bool hostReachable, bool serviceRunning)> CheckAsync(ServiceConfig service)
-  {
-    bool useSsh = IsRemote(service);
-    return useSsh
-        ? await CheckViaSshAsync(service)
-        : await CheckLocalAsync(service);
-  }
-
-  public async Task<bool> RestartAsync(ServiceConfig service)
-  {
-    bool useSsh = IsRemote(service);
-    string command = !string.IsNullOrWhiteSpace(service.Ssh?.RestartCommand)
-    ? service.Ssh!.RestartCommand!
-    : BuildRestartCommand(service.Name);
-
-    try
+    public ServiceProbe(LogingService logger)
     {
-      if (useSsh)
-      {
-        using var client = new SshClient(service.Host, service.Ssh!.User, service.Ssh!.Password);
-        client.Connect();
-        if (!client.IsConnected) return false;
+        _logger = logger;
+    }
 
-        var result = client.RunCommand(command);
-        client.Disconnect();
-
-        _logger.Info("ssh_probe",
-            $"[{service.Name}] RESTART via SSH: exit={result.ExitStatus}");
-        return result.ExitStatus == 0;
-      }
-      else
-      {
-        if (!OperatingSystem.IsLinux())
+    public async Task<(bool hostReachable, bool serviceRunning)> CheckAsync(ServiceConfig service)
+    {
+        if (!service.SshEnabled)
         {
-          _logger.Warning("ssh_probe", $"[{service.Name}] Локальный рестарт не поддерживается на этой ОС");
-          return false;
+            _logger.Warning("ssh_probe", $"[{service.LogName}] SSH не настроен — проверка пропущена");
+            return (false, false);
         }
 
-        var psi = new ProcessStartInfo
-        {
-          FileName = "bash",
-          Arguments = $"-c \"{command.Replace("\"", "\\\"")}\"",
-          RedirectStandardOutput = true,
-          RedirectStandardError = true,
-          UseShellExecute = false,
-          CreateNoWindow = true
-        };
-
-        using var proc = Process.Start(psi);
-        if (proc == null) return false;
-
-        var stdout = await proc.StandardOutput.ReadToEndAsync();
-        var stderr = await proc.StandardError.ReadToEndAsync();
-        await proc.WaitForExitAsync();
-
-        _logger.Info("ssh_probe",
-            $"[{service.Name}] RESTART локально: exit={proc.ExitCode}");
-        return proc.ExitCode == 0;
-      }
+        bool useSsh = IsRemote(service);
+        return useSsh
+            ? await CheckViaSshAsync(service)
+            : await CheckLocalAsync(service);
     }
-    catch (Exception ex)
+
+    public async Task<bool> RestartAsync(ServiceConfig service)
     {
-      _logger.Error("ssh_probe", $"[{service.Name}] RESTART failed: {ex.Message}");
-      return false;
+        if (!service.SshEnabled)
+        {
+            _logger.Warning("ssh_probe", $"[{service.LogName}] SSH не настроен — перезапуск невозможен");
+            return false;
+        }
+
+        bool useSsh = IsRemote(service);
+        string command = !string.IsNullOrWhiteSpace(service.Ssh!.RestartCommand)
+            ? service.Ssh!.RestartCommand!
+            : BuildRestartCommand(service.Name);
+
+        try
+        {
+            if (useSsh)
+            {
+                using var client = new SshClient(service.Host, service.Ssh!.User, service.Ssh!.Password);
+                client.Connect();
+                if (!client.IsConnected) return false;
+
+                var result = client.RunCommand(command);
+                client.Disconnect();
+
+                _logger.Info("ssh_probe",
+                    $"[{service.LogName}] RESTART via SSH: exit={result.ExitStatus}");
+                return result.ExitStatus == 0;
+            }
+            else
+            {
+                if (!OperatingSystem.IsLinux())
+                {
+                    _logger.Warning("ssh_probe", $"[{service.LogName}] Локальный рестарт не поддерживается");
+                    return false;
+                }
+
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "bash",
+                    Arguments = $"-c \"{command.Replace("\"", "\\\"")}\"",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var proc = Process.Start(psi);
+                if (proc == null) return false;
+
+                var stdout = await proc.StandardOutput.ReadToEndAsync();
+                var stderr = await proc.StandardError.ReadToEndAsync();
+                await proc.WaitForExitAsync();
+
+                _logger.Info("ssh_probe",
+                    $"[{service.LogName}] RESTART локально: exit={proc.ExitCode}");
+                return proc.ExitCode == 0;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("ssh_probe", $"[{service.LogName}] RESTART failed: {ex.Message}");
+            return false;
+        }
     }
-  }
 
-  private static bool IsRemote(ServiceConfig s) =>
-      !string.IsNullOrEmpty(s.Host) &&
-      s.Host != "localhost" &&
-      s.Host != "127.0.0.1";
+    private static bool IsRemote(ServiceConfig s) =>
+        !string.IsNullOrEmpty(s.Host) &&
+        s.Host != "localhost" &&
+        s.Host != "127.0.0.1";
 
-  private string BuildCheckCommand(string name, int port)
-  { /* без изменений */
-    return $@"
+    private string BuildCheckCommand(string name, int port) { /* без изменений */ 
+        return $@"
 (
   if command -v systemctl >/dev/null 2>&1; then
     if systemctl list-unit-files 2>/dev/null | grep -qE '^{name}\.service\s'; then
@@ -184,11 +195,10 @@ public class ServiceProbe
   fi
   echo STOPPED
 )";
-  }
+    }
 
-  private string BuildRestartCommand(string name)
-  { /* без изменений */
-    return $@"
+    private string BuildRestartCommand(string name) { /* без изменений */
+        return $@"
 (
   if command -v systemctl >/dev/null 2>&1; then
     if systemctl list-unit-files 2>/dev/null | grep -qE '^{name}\.service\s'; then
@@ -203,71 +213,71 @@ public class ServiceProbe
   fi
   exit 1
 )";
-  }
-
-  private async Task<(bool, bool)> CheckViaSshAsync(ServiceConfig service)
-  {
-    try
-    {
-      using var client = new SshClient(service.Host, service.Ssh!.User, service.Ssh!.Password);
-      client.Connect();
-
-      if (!client.IsConnected)
-      {
-        _logger.Error("ssh_probe", $"[{service.Name}] SSH connect failed");
-        return (false, false);
-      }
-
-      var cmd = BuildCheckCommand(service.Name, service.Port);
-      var result = client.RunCommand(cmd);
-      client.Disconnect();
-
-      bool isRunning = result.Result?.Trim().EndsWith("RUNNING") == true;
-      _logger.Info("ssh_probe", $"[{service.Name}] SSH check → {(isRunning ? "RUNNING" : "STOPPED")}");
-      return (true, isRunning);
-    }
-    catch (Exception ex)
-    {
-      _logger.Error("ssh_probe", $"[{service.Name}] SSH probe error: {ex.Message}");
-      return (false, false);
-    }
-  }
-
-  private async Task<(bool, bool)> CheckLocalAsync(ServiceConfig service)
-  {
-    if (!OperatingSystem.IsLinux())
-    {
-      _logger.Warning("ssh_probe", $"[{service.Name}] Локальная проверка не поддерживается");
-      return (true, false);
     }
 
-    try
+    private async Task<(bool, bool)> CheckViaSshAsync(ServiceConfig service)
     {
-      var cmd = BuildCheckCommand(service.Name, service.Port);
-      var psi = new ProcessStartInfo
-      {
-        FileName = "bash",
-        Arguments = $"-c \"{cmd.Replace("\"", "\\\"")}\"",
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        UseShellExecute = false,
-        CreateNoWindow = true
-      };
+        try
+        {
+            using var client = new SshClient(service.Host, service.Ssh!.User, service.Ssh!.Password);
+            client.Connect();
 
-      using var proc = Process.Start(psi);
-      if (proc == null) return (true, false);
+            if (!client.IsConnected)
+            {
+                _logger.Error("ssh_probe", $"[{service.LogName}] SSH connect failed");
+                return (false, false);
+            }
 
-      var output = await proc.StandardOutput.ReadToEndAsync();
-      await proc.WaitForExitAsync();
+            var cmd = BuildCheckCommand(service.Name, service.Port);
+            var result = client.RunCommand(cmd);
+            client.Disconnect();
 
-      bool isRunning = output.Trim().EndsWith("RUNNING");
-      _logger.Info("ssh_probe", $"[{service.Name}] Локальная проверка → {(isRunning ? "RUNNING" : "STOPPED")}");
-      return (true, isRunning);
+            bool isRunning = result.Result?.Trim().EndsWith("RUNNING") == true;
+            _logger.Info("ssh_probe", $"[{service.LogName}] SSH check → {(isRunning ? "RUNNING" : "STOPPED")}");
+            return (true, isRunning);
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("ssh_probe", $"[{service.LogName}] SSH probe error: {ex.Message}");
+            return (false, false);
+        }
     }
-    catch (Exception ex)
+
+    private async Task<(bool, bool)> CheckLocalAsync(ServiceConfig service)
     {
-      _logger.Error("ssh_probe", $"[{service.Name}] Local probe error: {ex.Message}");
-      return (true, false);
+        if (!OperatingSystem.IsLinux())
+        {
+            _logger.Warning("ssh_probe", $"[{service.LogName}] Локальная проверка не поддерживается");
+            return (true, false);
+        }
+
+        try
+        {
+            var cmd = BuildCheckCommand(service.Name, service.Port);
+            var psi = new ProcessStartInfo
+            {
+                FileName = "bash",
+                Arguments = $"-c \"{cmd.Replace("\"", "\\\"")}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using var proc = Process.Start(psi);
+            if (proc == null) return (true, false);
+
+            var output = await proc.StandardOutput.ReadToEndAsync();
+            await proc.WaitForExitAsync();
+
+            bool isRunning = output.Trim().EndsWith("RUNNING");
+            _logger.Info("ssh_probe", $"[{service.LogName}] Локальная проверка → {(isRunning ? "RUNNING" : "STOPPED")}");
+            return (true, isRunning);
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("ssh_probe", $"[{service.LogName}] Local probe error: {ex.Message}");
+            return (true, false);
+        }
     }
-  }
 }

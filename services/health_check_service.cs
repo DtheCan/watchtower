@@ -20,11 +20,9 @@ public class HealthCheckService : BackgroundService
     private readonly int _healthyNotifyCount;
     private readonly List<ServiceConfig> _services;
 
-    // сервис -> хост доступен по SSH
+    // ключ = svc.Key ("SRV-2:nginx")
     private readonly ConcurrentDictionary<string, bool> _hostReachable = new();
-    // сервис -> сколько "всё ок" уже отправили после восстановления
     private readonly ConcurrentDictionary<string, int> _healthyNotifyCounter = new();
-    // сервис -> был ли он в проблеме на прошлом цикле
     private readonly ConcurrentDictionary<string, bool> _wasProblem = new();
 
     public HealthCheckService(
@@ -57,6 +55,15 @@ public class HealthCheckService : BackgroundService
         _logger.Info("HealthCheckService started.");
         _logger.Info($"Мониторинг {_services.Count} сервисов, интервал {_checkInterval}s");
 
+        // Проверим уникальность ключей — иначе два сервиса будут конфликтовать
+        var duplicates = _services
+            .GroupBy(s => s.Key)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .ToList();
+        if (duplicates.Count > 0)
+            _logger.Warning($"Дубликаты ключей в конфиге: {string.Join(", ", duplicates)}");
+
         while (!stoppingToken.IsCancellationRequested)
         {
             var tasks = _services.Select(s => CheckServiceAsync(s, stoppingToken));
@@ -77,12 +84,12 @@ public class HealthCheckService : BackgroundService
 
     private async Task CheckServiceAsync(ServiceConfig svc, CancellationToken ct)
     {
-        if (_maintenance.IsUnderMaintenance(svc.Name)) return;
+        if (_maintenance.IsUnderMaintenance(svc.Key)) return;
 
         bool httpOk = false;
         int? httpCode = null;
 
-        // 1. HTTP (если задан HttpCheck)
+        // 1. HTTP
         if (svc.HttpEnabled)
         {
             var (reachable, healthy, code, _) = await _httpProbe.CheckAsync(svc, ct);
@@ -96,22 +103,13 @@ public class HealthCheckService : BackgroundService
             }
         }
 
-        // 2. SSH (если задан Ssh)
+        // 2. SSH
         if (svc.SshEnabled)
         {
             var (reachable, running) = await _sshProbe.CheckAsync(svc);
 
-            if (!reachable)
-            {
-                await OnHostUnreachable(svc);
-                return;
-            }
-
-            if (!running)
-            {
-                await OnServiceDown(svc);
-                return;
-            }
+            if (!reachable) { await OnHostUnreachable(svc); return; }
+            if (!running)   { await OnServiceDown(svc); return; }
 
             await OnHealthy(svc, httpCode,
                 sshReachable: true,
@@ -120,10 +118,10 @@ public class HealthCheckService : BackgroundService
             return;
         }
 
-        // 3. Ни HTTP, ни SSH — сервис не настроен
+        // 3. Ни HTTP, ни SSH
         if (!svc.HttpEnabled && !svc.SshEnabled)
         {
-            _logger.Warning($"[{svc.Name}] Не заданы ни HttpCheck, ни Ssh — проверка невозможна");
+            _logger.Warning($"[{svc.LogName}] Не заданы ни HttpCheck, ни Ssh — проверка невозможна");
         }
     }
 
@@ -136,13 +134,17 @@ public class HealthCheckService : BackgroundService
         bool sshRunning = false,
         bool httpSuspicious = false)
     {
-        bool wasProblem = _wasProblem.GetValueOrDefault(svc.Name, false);
-        _wasProblem[svc.Name] = false;
-        _hostReachable[svc.Name] = true;
+        bool wasProblem = _wasProblem.GetValueOrDefault(svc.Key, false);
+        _wasProblem[svc.Key] = false;
+        _hostReachable[svc.Key] = true;
 
         _stateStore.Update(new ServiceStateStore.ServiceState
         {
+            Key = svc.Key,
+            NodeName = svc.NodeName,
             Name = svc.Name,
+            Host = svc.Host,
+            Port = svc.Port,
             HttpOk = httpCode == (svc.HttpCheck?.ExpectedStatusCode ?? 200),
             HttpCode = httpCode,
             SshOk = sshReachable,
@@ -151,29 +153,34 @@ public class HealthCheckService : BackgroundService
             InMaintenance = false
         });
 
-        _logger.Info($"[OK] {svc.Name}" +
+        _logger.Info($"[OK] {svc.LogName}" +
             (httpSuspicious ? " (HTTP-проверка не прошла, SSH OK)" : ""));
 
+        // "Всё ок" после восстановления — N раз
         if (!wasProblem) return;
 
-        int sent = _healthyNotifyCounter.GetValueOrDefault(svc.Name, 0);
+        int sent = _healthyNotifyCounter.GetValueOrDefault(svc.Key, 0);
         if (sent >= _healthyNotifyCount) return;
 
-        _healthyNotifyCounter[svc.Name] = sent + 1;
+        _healthyNotifyCounter[svc.Key] = sent + 1;
         await _telegram.SendMessageAsync(
-            $"✅ Сервис «{svc.Name}» — работает в штатном режиме.",
+            $"✅ Сервис «{svc.DisplayName}» — работает в штатном режиме.",
             throttle: false);
     }
 
     private async Task OnHostUnreachable(ServiceConfig svc)
     {
-        _wasProblem[svc.Name] = true;
-        _hostReachable[svc.Name] = false;
-        _healthyNotifyCounter[svc.Name] = 0;
+        _wasProblem[svc.Key] = true;
+        _hostReachable[svc.Key] = false;
+        _healthyNotifyCounter[svc.Key] = 0;
 
         _stateStore.Update(new ServiceStateStore.ServiceState
         {
+            Key = svc.Key,
+            NodeName = svc.NodeName,
             Name = svc.Name,
+            Host = svc.Host,
+            Port = svc.Port,
             HttpOk = false,
             SshOk = false,
             SshRunning = false,
@@ -181,18 +188,22 @@ public class HealthCheckService : BackgroundService
             InMaintenance = false
         });
 
-        _logger.Warning($"[UNREACHABLE] {svc.Name} — сервер недоступен, повтор через {_unreachableCheckInterval}s");
-        await _telegram.SendMessageAsync($"⚠️ Сервис «{svc.Name}» — сервер недоступен.");
+        _logger.Warning($"[UNREACHABLE] {svc.LogName} — сервер недоступен, повтор через {_unreachableCheckInterval}s");
+        await _telegram.SendMessageAsync($"⚠️ Сервис «{svc.DisplayName}» — сервер недоступен.");
     }
 
     private async Task OnServiceDown(ServiceConfig svc)
     {
-        _wasProblem[svc.Name] = true;
-        _healthyNotifyCounter[svc.Name] = 0;
+        _wasProblem[svc.Key] = true;
+        _healthyNotifyCounter[svc.Key] = 0;
 
         _stateStore.Update(new ServiceStateStore.ServiceState
         {
+            Key = svc.Key,
+            NodeName = svc.NodeName,
             Name = svc.Name,
+            Host = svc.Host,
+            Port = svc.Port,
             HttpOk = false,
             SshOk = true,
             SshRunning = false,
@@ -200,8 +211,8 @@ public class HealthCheckService : BackgroundService
             InMaintenance = false
         });
 
-        _logger.Warning($"[DOWN] {svc.Name} — сервис не работает");
-        await _telegram.SendMessageAsync($"🔴 Сервис «{svc.Name}» — не работает.");
+        _logger.Warning($"[DOWN] {svc.LogName} — сервис не работает");
+        await _telegram.SendMessageAsync($"🔴 Сервис «{svc.DisplayName}» — не работает.");
 
         await _restarter.RestartServiceAsync(svc);
     }
