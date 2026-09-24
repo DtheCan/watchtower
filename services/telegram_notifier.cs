@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Configuration;
 using Telegram.Bot;
 
 namespace watchtower.services;

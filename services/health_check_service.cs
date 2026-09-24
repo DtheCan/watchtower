@@ -1,6 +1,4 @@
 using System.Collections.Concurrent;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Hosting;
 
 namespace watchtower.services;
 
@@ -37,10 +35,10 @@ public class HealthCheckService : BackgroundService
         _checkInterval = _config.GetValue<int>("CheckIntervalSeconds", 30);
         _unreachableCheckInterval = _config.GetValue<int>("UnreachableCheckIntervalSeconds", 120);
         _healthyNotifyCount = _config.GetValue<int>("HealthyNotifyCount", 2);
-        _services = _config.GetSection("Services").Get<List<ServiceConfig>>() ?? new List<ServiceConfig>();
+        _services = _config.GetSection("Services").Get<List<ServiceConfig>>() ?? [];
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected async override Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.Info("HealthCheckService started.");
         _logger.Info($"Monitoring {_services.Count} services...");
@@ -97,7 +95,7 @@ public class HealthCheckService : BackgroundService
                 return;
             }
 
-            bool wasUnreachable = _hostReachable.TryGetValue(HostKey(service), out var prev) && !prev;
+            var wasUnreachable = _hostReachable.TryGetValue(HostKey(service), out var prev) && !prev;
             _hostReachable[HostKey(service)] = true;
 
             if (wasUnreachable)
@@ -119,7 +117,7 @@ public class HealthCheckService : BackgroundService
 
                 // Отправляем "всё хорошо" только первые N раз
                 var key = HostKey(service);
-                int sent = _healthyNotifyCounter.GetValueOrDefault(key, 0);
+                var sent = _healthyNotifyCounter.GetValueOrDefault(key, 0);
                 if (sent < _healthyNotifyCount)
                 {
                     _healthyNotifyCounter[key] = sent + 1;

@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Configuration;
-
 namespace watchtower.services;
 
 public class LogingService
@@ -10,11 +8,11 @@ public class LogingService
     {
         // Используем путь из конфигурации
         _basePath = config.GetValue<string>("LogPath") ?? "/var/log/watchtower";
-        
+
         // Создаем основную папку для логов
         if (!Directory.Exists(_basePath))
             Directory.CreateDirectory(_basePath);
-        
+
         // Создаем подпапки для каждого сервиса
         foreach (var service in new[] { "telegram_notifier", "service_restarter", "health_check_service" })
         {

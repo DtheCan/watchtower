@@ -9,14 +9,9 @@ namespace watchtower.services;
 /// Пытается определить способ управления сервисом автоматически:
 /// systemd -> OpenRC -> SysV init -> process -> port-only.
 /// </summary>
-public class ServiceProbe
+public class ServiceProbe(LogingService logger)
 {
-    private readonly LogingService _logger;
-
-    public ServiceProbe(LogingService logger)
-    {
-        _logger = logger;
-    }
+    private readonly LogingService _logger = logger;
 
     // -------- Публичный API --------
 
@@ -25,7 +20,7 @@ public class ServiceProbe
     /// </summary>
     public async Task<(bool hostReachable, bool serviceRunning)> CheckAsync(ServiceConfig service)
     {
-        bool useSsh = IsRemote(service);
+        var useSsh = IsRemote(service);
 
         if (useSsh)
             return await CheckViaSshAsync(service);
@@ -38,9 +33,9 @@ public class ServiceProbe
     /// </summary>
     public async Task<bool> RestartAsync(ServiceConfig service)
     {
-        bool useSsh = IsRemote(service);
+        var useSsh = IsRemote(service);
 
-        string command = BuildRestartCommand(service.Name);
+        var command = BuildRestartCommand(service.Name);
 
         try
         {
@@ -103,7 +98,7 @@ public class ServiceProbe
     /// Строит bash-команду, которая печатает RUNNING или STOPPED.
     /// Пробует несколько способов последовательно.
     /// </summary>
-    private string BuildCheckCommand(string name, int port)
+    private static string BuildCheckCommand(string name, int port)
     {
         return $@"
 (
@@ -157,9 +152,9 @@ public class ServiceProbe
 )";
     }
 
-    private string BuildRestartCommand(string name)
-{
-    return $@"
+    private static string BuildRestartCommand(string name)
+    {
+        return $@"
 (
   if command -v systemctl >/dev/null 2>&1; then
     if systemctl list-unit-files 2>/dev/null | grep -qE '^{name}\.service\s'; then
@@ -174,7 +169,7 @@ public class ServiceProbe
   fi
   exit 1
 )";
-}
+    }
 
     private async Task<(bool, bool)> CheckViaSshAsync(ServiceConfig service)
     {
@@ -193,7 +188,7 @@ public class ServiceProbe
             var result = client.RunCommand(cmd);
             client.Disconnect();
 
-            bool isRunning = result.Result?.Trim().EndsWith("RUNNING") == true;
+            var isRunning = result.Result?.Trim().EndsWith("RUNNING") == true;
             return (true, isRunning);
         }
         catch (Exception ex)
