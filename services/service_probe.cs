@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net;
 using Renci.SshNet;
 
 namespace watchtower.services;
@@ -90,9 +91,7 @@ public class ServiceProbe(LogingService logger)
     // -------- Внутренняя логика --------
 
     private static bool IsRemote(ServiceConfig s) =>
-        !string.IsNullOrEmpty(s.Host) &&
-        s.Host != "localhost" &&
-        s.Host != "127.0.0.1";
+        !string.IsNullOrEmpty(s.Host) && IPAddress.TryParse(s.Host, out var address) && !IPAddress.IsLoopback(address); 
 
     /// <summary>
     /// Строит bash-команду, которая печатает RUNNING или STOPPED.
