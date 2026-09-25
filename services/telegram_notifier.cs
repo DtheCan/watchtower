@@ -21,7 +21,7 @@ public class TelegramNotifier
         try
         {
             var fullMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {message}";
-            await _bot.SendTextMessageAsync(_chatId, fullMessage);
+            await _bot.SendMessage(_chatId, fullMessage);
             _logger.Info("telegram_notifier", $"Telegram sent: {message}");
         }
         catch (Exception ex)
