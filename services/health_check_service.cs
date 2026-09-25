@@ -3,41 +3,26 @@ using w2.models;
 
 namespace w2.services;
 
-public class HealthCheckService : BackgroundService
+public class HealthCheckService(
+        IConfiguration config,
+        LogingService logger,
+        ServiceRestarter restarter,
+        TelegramNotifier telegram,
+        ServiceProbe probe) : BackgroundService
 {
-    private readonly IConfiguration _config;
-    private readonly LogingService _logger;
-    private readonly ServiceRestarter _restarter;
-    private readonly TelegramNotifier _telegram;
-    private readonly ServiceProbe _probe;
-    private readonly int _checkInterval;
-    private readonly int _unreachableCheckInterval;
-    private readonly int _healthyNotifyCount;
-    private readonly List<ServiceConfig> _services;
+    private readonly LogingService _logger = logger;
+    private readonly ServiceRestarter _restarter = restarter;
+    private readonly TelegramNotifier _telegram = telegram;
+    private readonly ServiceProbe _probe = probe;
+    private readonly int _checkInterval = config.GetValue<int>("CheckIntervalSeconds", 30);
+    private readonly int _unreachableCheckInterval = config.GetValue<int>("UnreachableCheckIntervalSeconds", 120);
+    private readonly int _healthyNotifyCount = config.GetValue<int>("HealthyNotifyCount", 2);
+    private readonly List<ServiceConfig> _services = config.GetSection("Services").Get<List<ServiceConfig>>() ?? [];
 
     // host -> последнее известное состояние доступности
     private readonly ConcurrentDictionary<string, bool> _hostReachable = new();
     // host -> сколько раз уже отправили "всё хорошо"
     private readonly ConcurrentDictionary<string, int> _healthyNotifyCounter = new();
-
-    public HealthCheckService(
-        IConfiguration config,
-        LogingService logger,
-        ServiceRestarter restarter,
-        TelegramNotifier telegram,
-        ServiceProbe probe)
-    {
-        _config = config;
-        _logger = logger;
-        _restarter = restarter;
-        _telegram = telegram;
-        _probe = probe;
-
-        _checkInterval = _config.GetValue<int>("CheckIntervalSeconds", 30);
-        _unreachableCheckInterval = _config.GetValue<int>("UnreachableCheckIntervalSeconds", 120);
-        _healthyNotifyCount = _config.GetValue<int>("HealthyNotifyCount", 2);
-        _services = _config.GetSection("Services").Get<List<ServiceConfig>>() ?? [];
-    }
 
     protected async override Task ExecuteAsync(CancellationToken stoppingToken)
     {
