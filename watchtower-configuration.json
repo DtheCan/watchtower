@@ -1,4 +1,5 @@
 {
+  "$schema": "./watchtower-configuration.schema.json",
   "CheckIntervalSeconds": 5,
   "UnreachableCheckIntervalSeconds": 120,
   "HealthyNotifyCount": 2,
@@ -8,8 +9,11 @@
       "Name": "nginx",
       "Host": "ваш айпи адрес сервера",
       "Port": 80,
+      "Ssh": {
+        "SshType": "PasswordAuth",
       "SshUser": "root",
       "SshPassword": "ваш SSH-пароль"
+    }
     }
   ],
   "Telegram": {

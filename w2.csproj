@@ -23,6 +23,7 @@
   <ItemGroup>
     <!-- файлы которые не идут в сборку -->
     <Content Update="watchtower-configuration.json" CopyToPublishDirectory="Never" />
+    <Content Update="watchtower-configuration.config.json" CopyToPublishDirectory="Never" />
   </ItemGroup>
 
 </Project>
