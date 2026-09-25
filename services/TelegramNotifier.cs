@@ -2,19 +2,11 @@ using Telegram.Bot;
 
 namespace w2.services;
 
-public class TelegramNotifier
+public class TelegramNotifier(IConfiguration config, LogingService logger)
 {
-    private readonly TelegramBotClient _bot;
-    private readonly string _chatId;
-    private readonly LogingService _logger;
-
-    public TelegramNotifier(IConfiguration config, LogingService logger)
-    {
-        var token = config["Telegram:BotToken"];
-        _chatId = config["Telegram:ChatId"] ?? string.Empty;
-        _bot = new TelegramBotClient(token ?? string.Empty);
-        _logger = logger;
-    }
+    private readonly TelegramBotClient _bot = new(config["Telegram:BotToken"] ?? string.Empty);
+    private readonly string _chatId = config["Telegram:ChatId"] ?? string.Empty;
+    private readonly LogingService _logger = logger;
 
     public async Task SendMessageAsync(string message)
     {
