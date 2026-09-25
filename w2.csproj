@@ -15,8 +15,8 @@
   <ItemGroup>
     <!-- Библиотеки -->
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
-    <PackageReference Include="Telegram.Bot" Version="22.10.0" />
-    <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.0" />
+    <PackageReference Include="Telegram.Bot" Version="22.10.3.1" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.12" />
     <PackageReference Include="SSH.NET" Version="2026.0.0" />
   </ItemGroup>
 
