@@ -1,4 +1,6 @@
-namespace watchtower.services;
+using w2.models;
+
+namespace w2.services;
 
 public class ServiceRestarter(LogingService logger, TelegramNotifier telegram, ServiceProbe probe)
 {

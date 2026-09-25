@@ -1,4 +1,4 @@
-namespace watchtower.services;
+namespace w2.services;
 
 public class LogingService
 {

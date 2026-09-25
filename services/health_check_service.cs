@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
+using w2.models;
 
-namespace watchtower.services;
+namespace w2.services;
 
 public class HealthCheckService : BackgroundService
 {

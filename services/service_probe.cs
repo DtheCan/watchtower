@@ -1,8 +1,10 @@
 using System.Diagnostics;
 using System.Net;
 using Renci.SshNet;
+using w2.enums;
+using w2.models;
 
-namespace watchtower.services;
+namespace w2.services;
 
 /// <summary>
 /// Универсальный "пробник" и "перезапускатель" сервиса.
@@ -42,7 +44,7 @@ public class ServiceProbe(LogingService logger)
         {
             if (useSsh)
             {
-                using var client = new SshClient(service.Host, service.SshUser, service.SshPassword);
+                using var client = new SshClient(GetSshConnection(service));
                 client.Connect();
                 if (!client.IsConnected) return false;
 
@@ -91,7 +93,7 @@ public class ServiceProbe(LogingService logger)
     // -------- Внутренняя логика --------
 
     private static bool IsRemote(ServiceConfig s) =>
-        !string.IsNullOrEmpty(s.Host) && IPAddress.TryParse(s.Host, out var address) && !IPAddress.IsLoopback(address); 
+         !string.IsNullOrEmpty(s.Host) && IPAddress.TryParse(s.Host, out var address) && !IPAddress.IsLoopback(address);
 
     /// <summary>
     /// Строит bash-команду, которая печатает RUNNING или STOPPED.
@@ -174,7 +176,7 @@ public class ServiceProbe(LogingService logger)
     {
         try
         {
-            using var client = new SshClient(service.Host, service.SshUser, service.SshPassword);
+            using var client = new SshClient(GetSshConnection(service));
             client.Connect();
 
             if (!client.IsConnected)
@@ -231,5 +233,17 @@ public class ServiceProbe(LogingService logger)
             _logger.Error($"Local probe error {service.Name}: {ex.Message}");
             return (true, false);
         }
+    }
+
+    private static Renci.SshNet.ConnectionInfo GetSshConnection(ServiceConfig service)
+    {
+        return service.Ssh.SshType switch
+        {
+            SshConfigType.PasswordAuth => new Renci.SshNet.ConnectionInfo(service.Host, service.Ssh.SshPort.ToString(),
+                new PasswordAuthenticationMethod(service.Ssh.SshUser, service.Ssh.SshPassword)),
+            SshConfigType.PrivateKeyAuth => new Renci.SshNet.ConnectionInfo(service.Host, service.Ssh.SshPort, service.Ssh.SshUser,
+                new PrivateKeyAuthenticationMethod(service.Ssh.SshUser, new PrivateKeyFile(service.Ssh.SshKeyFilePath, service.Ssh.SshPassphrase))),
+            _ => throw new ArgumentException()
+        };
     }
 }
