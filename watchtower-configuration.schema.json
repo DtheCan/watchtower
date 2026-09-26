@@ -1,0 +1,121 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WatchtowerConfig",
+  "type": "object",
+  "required": [
+    "CheckIntervalSeconds",
+    "UnreachableCheckIntervalSeconds",
+    "HealthyNotifyCount",
+    "LogPath",
+    "Services",
+    "Telegram"
+  ],
+  "properties": {
+    "CheckIntervalSeconds": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Interval in seconds to check healthy services."
+    },
+    "UnreachableCheckIntervalSeconds": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Interval in seconds to re-check unhealthy or unreachable services."
+    },
+    "HealthyNotifyCount": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Number of consecutive successful checks before stopping notifications."
+    },
+    "LogPath": {
+      "type": "string",
+      "description": "Absolute path to the log files directory."
+    },
+    "Services": {
+      "type": "array",
+      "description": "List of remote services to monitor.",
+      "items": {
+        "type": "object",
+        "required": [ "Name", "Host", "Port", "Ssh" ],
+        "properties": {
+          "Name": {
+            "type": "string",
+            "description": "Unique identifier for the service."
+          },
+          "Host": {
+            "type": "string",
+            "oneOf": [
+              { "format": "ipv4" },
+              { "format": "ipv6" },
+              { "format": "hostname" }
+            ],
+            "description": "IP address or domain name of the remote server."
+          },
+          "Port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "description": "Port number the service is running on."
+          },
+          "Ssh": {
+            "type": "object",
+            "required": [ "SshType", "SshUser" ],
+            "properties": {
+              "SshType": {
+                "type": "string",
+                "enum": [ "PasswordAuth", "PrivateKeyAuth" ],
+                "description": "Authentication method used to connect via SSH."
+              },
+              "SshUser": {
+                "type": "string",
+                "description": "SSH username."
+              },
+              "SshPort": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535,
+                "default": 22,
+                "description": "SSH port if different from the default port 22."
+              },
+              "SshPassword": {
+                "type": "string",
+                "description": "Password used when SshType is PasswordAuth."
+              },
+              "SshKeyFilePath": {
+                "type": "string",
+                "description": "Local path to the private key when SshType is PrivateKeyAuth."
+              }
+            },
+            "if": {
+              "properties": { "SshType": { "const": "PasswordAuth" } }
+            },
+            "then": {
+              "required": [ "SshPassword" ]
+            },
+            "else": {
+              "if": {
+                "properties": { "SshType": { "const": "PrivateKeyAuth" } }
+              },
+              "then": {
+                "required": [ "SshKeyFilePath" ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "Telegram": {
+      "type": "object",
+      "required": [ "BotToken", "ChatId" ],
+      "properties": {
+        "BotToken": {
+          "type": "string",
+          "description": "The unique Telegram HTTP API bot token."
+        },
+        "ChatId": {
+          "type": "string",
+          "description": "The Telegram chat or channel ID where notifications will be sent."
+        }
+      }
+    }
+  }
+}

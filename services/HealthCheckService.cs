@@ -1,46 +1,30 @@
 using System.Collections.Concurrent;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Hosting;
+using w2.models;
 
-namespace watchtower.services;
+namespace w2.services;
 
-public class HealthCheckService : BackgroundService
+public class HealthCheckService(
+        IConfiguration config,
+        LogingService logger,
+        ServiceRestarter restarter,
+        TelegramNotifier telegram,
+        ServiceProbe probe) : BackgroundService
 {
-    private readonly IConfiguration _config;
-    private readonly LogingService _logger;
-    private readonly ServiceRestarter _restarter;
-    private readonly TelegramNotifier _telegram;
-    private readonly ServiceProbe _probe;
-    private readonly int _checkInterval;
-    private readonly int _unreachableCheckInterval;
-    private readonly int _healthyNotifyCount;
-    private readonly List<ServiceConfig> _services;
+    private readonly LogingService _logger = logger;
+    private readonly ServiceRestarter _restarter = restarter;
+    private readonly TelegramNotifier _telegram = telegram;
+    private readonly ServiceProbe _probe = probe;
+    private readonly int _checkInterval = config.GetValue<int>("CheckIntervalSeconds", 30);
+    private readonly int _unreachableCheckInterval = config.GetValue<int>("UnreachableCheckIntervalSeconds", 120);
+    private readonly int _healthyNotifyCount = config.GetValue<int>("HealthyNotifyCount", 2);
+    private readonly List<ServiceConfig> _services = config.GetSection("Services").Get<List<ServiceConfig>>() ?? [];
 
     // host -> последнее известное состояние доступности
     private readonly ConcurrentDictionary<string, bool> _hostReachable = new();
     // host -> сколько раз уже отправили "всё хорошо"
     private readonly ConcurrentDictionary<string, int> _healthyNotifyCounter = new();
 
-    public HealthCheckService(
-        IConfiguration config,
-        LogingService logger,
-        ServiceRestarter restarter,
-        TelegramNotifier telegram,
-        ServiceProbe probe)
-    {
-        _config = config;
-        _logger = logger;
-        _restarter = restarter;
-        _telegram = telegram;
-        _probe = probe;
-
-        _checkInterval = _config.GetValue<int>("CheckIntervalSeconds", 30);
-        _unreachableCheckInterval = _config.GetValue<int>("UnreachableCheckIntervalSeconds", 120);
-        _healthyNotifyCount = _config.GetValue<int>("HealthyNotifyCount", 2);
-        _services = _config.GetSection("Services").Get<List<ServiceConfig>>() ?? new List<ServiceConfig>();
-    }
-
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected async override Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.Info("HealthCheckService started.");
         _logger.Info($"Monitoring {_services.Count} services...");
@@ -97,7 +81,7 @@ public class HealthCheckService : BackgroundService
                 return;
             }
 
-            bool wasUnreachable = _hostReachable.TryGetValue(HostKey(service), out var prev) && !prev;
+            var wasUnreachable = _hostReachable.TryGetValue(HostKey(service), out var prev) && !prev;
             _hostReachable[HostKey(service)] = true;
 
             if (wasUnreachable)
@@ -119,7 +103,7 @@ public class HealthCheckService : BackgroundService
 
                 // Отправляем "всё хорошо" только первые N раз
                 var key = HostKey(service);
-                int sent = _healthyNotifyCounter.GetValueOrDefault(key, 0);
+                var sent = _healthyNotifyCounter.GetValueOrDefault(key, 0);
                 if (sent < _healthyNotifyCount)
                 {
                     _healthyNotifyCounter[key] = sent + 1;
