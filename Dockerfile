@@ -2,6 +2,8 @@
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
+LABEL org.opencontainers.image.source=https://github.com/DtheCan/watchtower
+
 COPY w2.csproj ./
 RUN dotnet restore
 

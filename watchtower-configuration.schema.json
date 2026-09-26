@@ -83,6 +83,10 @@
               "SshKeyFilePath": {
                 "type": "string",
                 "description": "Local path to the private key when SshType is PrivateKeyAuth."
+              },
+              "SshPassphrase": {
+                "type": "string",
+                "description": "Key file passphrase, dont add if none was used"
               }
             },
             "if": {

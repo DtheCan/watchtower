@@ -11,7 +11,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - /opt/watchtower/watchtower-configuration.json:/app/watchtower-configuration.json:ro
+      - ./watchtower-configuration.json:/app/watchtower-configuration.json:ro
       - /var/log/watchtower:/var/log/watchtower
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
