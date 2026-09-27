@@ -1,17 +1,12 @@
-namespace watchtower.services;
+using w2.models;
 
-public class ServiceRestarter
+namespace w2.services;
+
+public class ServiceRestarter(LogingService logger, TelegramNotifier telegram, ServiceProbe probe)
 {
-    private readonly LogingService _logger;
-    private readonly TelegramNotifier _telegram;
-    private readonly ServiceProbe _probe;
-
-    public ServiceRestarter(LogingService logger, TelegramNotifier telegram, ServiceProbe probe)
-    {
-        _logger = logger;
-        _telegram = telegram;
-        _probe = probe;
-    }
+    private readonly LogingService _logger = logger;
+    private readonly TelegramNotifier _telegram = telegram;
+    private readonly ServiceProbe _probe = probe;
 
     public async Task RestartServiceAsync(ServiceConfig service)
     {
@@ -20,7 +15,7 @@ public class ServiceRestarter
 
         try
         {
-            bool success = await _probe.RestartAsync(service);
+            var success = await _probe.RestartAsync(service);
 
             if (success)
             {

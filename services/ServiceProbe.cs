@@ -1,110 +1,42 @@
 using System.Diagnostics;
+using System.Net;
 using Renci.SshNet;
+using w2.enums;
+using w2.models;
 
-namespace watchtower.services;
+namespace w2.services;
 
-public class HttpProbe
-{
-    private readonly LogingService _logger;
-    private readonly HttpClient _client;
-
-    public HttpProbe(LogingService logger, IHttpClientFactory factory)
-    {
-        _logger = logger;
-        _client = factory.CreateClient("probe");
-    }
-
-    public async Task<(bool reachable, bool healthy, int? statusCode, long elapsedMs)> CheckAsync(
-        ServiceConfig svc, CancellationToken ct)
-    {
-        var cfg = svc.HttpCheck!;
-        var sw = Stopwatch.StartNew();
-
-        try
-        {
-            using var req = new HttpRequestMessage(new HttpMethod(cfg.Method), cfg.Url);
-            foreach (var h in cfg.Headers)
-                req.Headers.TryAddWithoutValidation(h.Key, h.Value);
-
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(cfg.TimeoutSeconds));
-
-            using var resp = await _client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token);
-            sw.Stop();
-
-            int code = (int)resp.StatusCode;
-            bool ok = code == cfg.ExpectedStatusCode;
-
-            _logger.Info("http_probe",
-                $"[{svc.LogName}] {cfg.Method} {cfg.Url} → {code} за {sw.ElapsedMilliseconds}ms (ожидалось {cfg.ExpectedStatusCode})");
-
-            return (true, ok, code, sw.ElapsedMilliseconds);
-        }
-        catch (TaskCanceledException)
-        {
-            sw.Stop();
-            _logger.Warning("http_probe",
-                $"[{svc.LogName}] {cfg.Method} {cfg.Url} → TIMEOUT ({cfg.TimeoutSeconds}s)");
-            return (false, false, null, sw.ElapsedMilliseconds);
-        }
-        catch (HttpRequestException ex)
-        {
-            sw.Stop();
-            _logger.Warning("http_probe",
-                $"[{svc.LogName}] {cfg.Method} {cfg.Url} → ОШИБКА: {ex.Message}");
-            return (false, false, null, sw.ElapsedMilliseconds);
-        }
-        catch (Exception ex)
-        {
-            sw.Stop();
-            _logger.Error("http_probe",
-                $"[{svc.LogName}] {cfg.Method} {cfg.Url} → ИСКЛЮЧЕНИЕ: {ex.Message}");
-            return (false, false, null, sw.ElapsedMilliseconds);
-        }
-    }
-}
-
+/// <summary>
+/// Универсальный "пробник" и "перезапускатель" сервиса.
+/// Работает через SSH (для удалённых хостов) или локально (Linux).
+/// Пытается определить способ управления сервисом автоматически:
+/// systemd -> OpenRC -> SysV init -> process -> port-only.
+/// </summary>
 public class ServiceProbe
 {
-    private readonly LogingService _logger;
-
-    public ServiceProbe(LogingService logger)
-    {
-        _logger = logger;
-    }
+    private readonly LogingService _logger = logger;
 
     public async Task<(bool hostReachable, bool serviceRunning)> CheckAsync(ServiceConfig service)
     {
-        if (!service.SshEnabled)
-        {
-            _logger.Warning("ssh_probe", $"[{service.LogName}] SSH не настроен — проверка пропущена");
-            return (false, false);
-        }
-
         bool useSsh = IsRemote(service);
-        return useSsh
-            ? await CheckViaSshAsync(service)
-            : await CheckLocalAsync(service);
+
+        if (useSsh)
+            return await CheckViaSshAsync(service);
+        else
+            return await CheckLocalAsync(service);
     }
 
     public async Task<bool> RestartAsync(ServiceConfig service)
     {
-        if (!service.SshEnabled)
-        {
-            _logger.Warning("ssh_probe", $"[{service.LogName}] SSH не настроен — перезапуск невозможен");
-            return false;
-        }
-
         bool useSsh = IsRemote(service);
-        string command = !string.IsNullOrWhiteSpace(service.Ssh!.RestartCommand)
-            ? service.Ssh!.RestartCommand!
-            : BuildRestartCommand(service.Name);
+
+        string command = BuildRestartCommand(service.Name);
 
         try
         {
             if (useSsh)
             {
-                using var client = new SshClient(service.Host, service.Ssh!.User, service.Ssh!.Password);
+                using var client = new SshClient(service.Host, service.SshUser, service.SshPassword);
                 client.Connect();
                 if (!client.IsConnected) return false;
 
@@ -153,11 +85,14 @@ public class ServiceProbe
     }
 
     private static bool IsRemote(ServiceConfig s) =>
-        !string.IsNullOrEmpty(s.Host) &&
-        s.Host != "localhost" &&
-        s.Host != "127.0.0.1";
+         !string.IsNullOrEmpty(s.Host) && IPAddress.TryParse(s.Host, out var address) && !IPAddress.IsLoopback(address);
 
-    private string BuildCheckCommand(string name, int port) { /* без изменений */ 
+    /// <summary>
+    /// Строит bash-команду, которая печатает RUNNING или STOPPED.
+    /// Пробует несколько способов последовательно.
+    /// </summary>
+    private string BuildCheckCommand(string name, int port)
+    {
         return $@"
 (
   if command -v systemctl >/dev/null 2>&1; then
@@ -197,7 +132,8 @@ public class ServiceProbe
 )";
     }
 
-    private string BuildRestartCommand(string name) { /* без изменений */
+    private string BuildRestartCommand(string name)
+    {
         return $@"
 (
   if command -v systemctl >/dev/null 2>&1; then
@@ -219,7 +155,7 @@ public class ServiceProbe
     {
         try
         {
-            using var client = new SshClient(service.Host, service.Ssh!.User, service.Ssh!.Password);
+            using var client = new SshClient(service.Host, service.SshUser, service.SshPassword);
             client.Connect();
 
             if (!client.IsConnected)
@@ -233,7 +169,6 @@ public class ServiceProbe
             client.Disconnect();
 
             bool isRunning = result.Result?.Trim().EndsWith("RUNNING") == true;
-            _logger.Info("ssh_probe", $"[{service.LogName}] SSH check → {(isRunning ? "RUNNING" : "STOPPED")}");
             return (true, isRunning);
         }
         catch (Exception ex)
@@ -279,5 +214,17 @@ public class ServiceProbe
             _logger.Error("ssh_probe", $"[{service.LogName}] Local probe error: {ex.Message}");
             return (true, false);
         }
+    }
+
+    private static Renci.SshNet.ConnectionInfo GetSshConnection(ServiceConfig service)
+    {
+        return service.Ssh.SshType switch
+        {
+            SshConfigType.PasswordAuth => new Renci.SshNet.ConnectionInfo(service.Host, service.Ssh.SshPort.ToString(),
+                new PasswordAuthenticationMethod(service.Ssh.SshUser, service.Ssh.SshPassword)),
+            SshConfigType.PrivateKeyAuth => new Renci.SshNet.ConnectionInfo(service.Host, service.Ssh.SshPort, service.Ssh.SshUser,
+                new PrivateKeyAuthenticationMethod(service.Ssh.SshUser, new PrivateKeyFile(service.Ssh.SshKeyFilePath, service.Ssh.SshPassphrase))),
+            _ => throw new ArgumentException()
+        };
     }
 }

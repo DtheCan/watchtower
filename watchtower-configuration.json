@@ -1,4 +1,5 @@
 {
+  "$schema": "./watchtower-configuration.schema.json",
   "CheckIntervalSeconds": 5,
   "UnreachableCheckIntervalSeconds": 120,
   "HealthyNotifyCount": 2,
@@ -18,8 +19,9 @@
       "Name": "nginx",
       "Host": "10.0.0.20",
       "Port": 80,
-      "HttpCheck": { "Url": "http://10.0.0.20/" },
-      "Ssh": { "User": "root", "Password": "..." }
+      "SshUser": "root",
+      "SshPassword": "ваш SSH-пароль"
+    }
     }
   ],
 
